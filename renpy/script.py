@@ -122,13 +122,11 @@ class Script(object):
 
         self.namemap = { }
         self.all_stmts = [ ]
-        self.all_pycode = [ ]
-        self.all_pyexpr = [ ]
+
+        self.all_py_code: dict[renpy.ast._BasePyCode, renpy.ast.PyCodeMetadata] | None = None
 
         # A list of statements that haven't been analyzed.
         self.need_analysis = [ ]
-
-        self.record_pycode = True
 
         # Bytecode caches.
         self.bytecode_oldcache = { }
@@ -450,6 +448,7 @@ class Script(object):
         list of init statements that need to be run.
         """
 
+        self.all_py_code = {}
         stmts = renpy.parser.parse(filename, filedata, linenumber=linenumber)
 
         if stmts is None:
@@ -465,7 +464,7 @@ class Script(object):
         initcode = [ ]
 
         stmts = self.finish_load(stmts, initcode, False)
-
+        self.all_py_code = None
         initcode.sort(key=lambda i: i[0])
 
         return stmts, initcode
@@ -719,9 +718,8 @@ class Script(object):
 
                 for mergefn in [ oldrpycfn, rpycfn ]:
 
-                    old_all_pyexpr = self.all_pyexpr
-                    self.record_pycode = False
-                    self.all_pyexpr = None
+                    old_all_py_code = self.all_py_code
+                    self.all_py_code = None
 
                     # See if we have a corresponding .rpyc file. If so, then
                     # we want to try to upgrade our .rpy file with it.
@@ -740,7 +738,7 @@ class Script(object):
                         pass
                     finally:
                         self.record_pycode = True
-                        self.all_pyexpr = old_all_pyexpr
+                        self.all_py_code = old_all_py_code
 
                 self.assign_names(stmts, renpy.lexer.elide_filename(fullfn))
 
@@ -820,9 +818,8 @@ class Script(object):
 
             renpy.parser.deferred_parse_errors = old_deferred_parse_errors
 
-
-
-    def load_appropriate_file(self, compiled, source_extensions, dir, fn, initcode): # @ReservedAssignment
+    def load_appropriate_file(self, compiled, source_extensions, dir, fn, initcode):  # @ReservedAssignment
+        self.all_py_code = {}
         data = None
 
         source = source_extensions[-1]
@@ -941,7 +938,8 @@ class Script(object):
         elif self.key != data['key']:
             raise Exception(fn + " does not share a key with at least one .rpyc file. To fix, delete all .rpyc files, or rerun Ren'Py with the --lock option.")
 
-        self.finish_load(stmts, initcode, filename=lastfn) # type: ignore
+        self.finish_load(stmts, initcode, filename=lastfn)  # type: ignore
+        self.all_py_code = None
 
         self.digest.update(digest) # type: ignore
 
@@ -969,24 +967,19 @@ class Script(object):
         cache. Clears out self.all_pycode.
         """
 
-        renpy.python.compile_warnings = [ ]
-
-        for i in self.all_pyexpr:
-            try:
-                renpy.python.py_compile(i, 'eval')
-            except Exception:
-                pass
-
-        self.all_pyexpr = [ ]
+        renpy.python.compile_warnings = []
 
         # Update all of the PyCode objects in the system with the loaded
         # bytecode.
 
-        for i in self.all_pycode:
+        base = bytes([renpy.bytecode_version])
+        t = int(time.time())
+        for code, meta in self.all_py_code.items():
+            loc = (meta["filename"], meta["linenumber"], code.source, t)
+            key = hashlib.md5((repr(loc) + code.source).encode("utf-8")).digest()
+            key = base + key + MAGIC
 
-            key = i.get_hash() + MAGIC
-
-            flags = renpy.python.file_compiler_flags.get(i.location[0], 0)
+            flags = renpy.python.file_compiler_flags.get(meta["filename"], 0)
             if flags:
                 if flags == __future__.division.compiler_flag:
                     # avoid triggering a recompile
@@ -996,23 +989,25 @@ class Script(object):
 
             warnings_key = ("warnings", key)
 
-            code = self.bytecode_oldcache.get(key, None)
+            py_code = self.bytecode_oldcache.get(key, None)
 
-            if code is None:
-
+            if py_code is None:
                 self.bytecode_dirty = True
 
                 old_ei = renpy.game.exception_info
-                renpy.game.exception_info = "While compiling python block starting at line %d of %s." % (i.location[1], i.location[0])
+                renpy.game.exception_info = "While compiling python block starting at line %d of %s." % (
+                    meta["linenumber"], meta["filename"])
 
                 try:
-
-                    if i.mode == 'exec':
-                        code = renpy.python.py_compile_exec_bytecode(i.source, filename=i.location[0], lineno=i.location[1], py=i.py)
-                    elif i.mode == 'hide':
-                        code = renpy.python.py_compile_hide_bytecode(i.source, filename=i.location[0], lineno=i.location[1], py=i.py)
-                    elif i.mode == 'eval':
-                        code = renpy.python.py_compile_eval_bytecode(i.source, filename=i.location[0], lineno=i.location[1], py=i.py)
+                    if code.mode == 'exec':
+                        py_code = renpy.python.py_compile_exec_bytecode(
+                            code.source, filename=meta["filename"], lineno=meta["linenumber"])
+                    elif code.mode == 'hide':
+                        py_code = renpy.python.py_compile_hide_bytecode(
+                            code.source, filename=meta["filename"], lineno=meta["linenumber"])
+                    elif code.mode == 'eval':
+                        py_code = renpy.python.py_compile_eval_bytecode(
+                            code.source, filename=meta["filename"], lineno=meta["linenumber"])
 
                 except SyntaxError as e:
 
@@ -1043,10 +1038,8 @@ class Script(object):
                 if warnings_key in self.bytecode_oldcache:
                     self.bytecode_newcache[warnings_key] = self.bytecode_oldcache[warnings_key]
 
-            self.bytecode_newcache[key] = code
-            i.bytecode = marshal.loads(code) # type: ignore
-
-        self.all_pycode = [ ]
+            self.bytecode_newcache[key] = py_code
+            code._code = marshal.loads(py_code)
 
     def save_bytecode(self):
         if renpy.macapp:

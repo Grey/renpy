@@ -1032,15 +1032,10 @@ def py_compile(source, mode, filename='<none>', lineno=1, ast_node=False, cache=
     if isinstance(source, ast.Module):
         return compile(source, filename, mode)
 
-    if isinstance(source, renpy.ast.PyExpr):
+    if isinstance(source, renpy.ast.PyEvalCode):
         filename = source.filename
         lineno = source.linenumber
-
-        if py is None:
-            py = source.py
-
-    if py is None:
-        py = 3
+        source = source.source
 
     if cache:
         key = (lineno, filename, str(source), mode, renpy.script.MAGIC)
@@ -1216,6 +1211,9 @@ def py_eval_bytecode(bytecode, globals=None, locals=None): # @ReservedAssignment
 def py_eval(code, globals=None, locals=None): # @ReservedAssignment
     if isinstance(code, basestring):
         code = py_compile(code, 'eval')
+
+    elif isinstance(code, renpy.ast._BasePyCode):
+        code = code.bytecode
 
     return py_eval_bytecode(code, globals, locals)
 
