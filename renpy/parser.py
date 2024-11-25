@@ -22,8 +22,8 @@
 # This module contains the parser for the Ren'Py script language. It's
 # called when parsing is necessary, and creates an AST from the script.
 
-from __future__ import division, absolute_import, with_statement, print_function, unicode_literals # type: ignore
-from renpy.compat import PY2, basestring, bchr, bord, chr, open, pystr, range, round, str, tobytes, unicode # *
+from __future__ import division, absolute_import, with_statement, print_function, unicode_literals  # type: ignore
+from renpy.compat import PY2, basestring, bchr, bord, chr, open, pystr, range, round, str, tobytes, unicode  # *
 
 import collections
 import time
@@ -48,7 +48,7 @@ from renpy.lexer import (
 )
 
 # A list of parse error messages.
-parse_errors = [ ]
+parse_errors = []
 
 # A list of deferred parser error. These are potential parse errors that
 # can be released or not when parse errors are reported.
@@ -57,14 +57,15 @@ deferred_parse_errors = collections.defaultdict(list)
 ################################################################################
 # Parsing of structures that are less than a full statement.
 
+
 def parse_image_name(l, string=False, nodash=False):
     """
     This parses an image name, and returns it as a tuple. It requires
     that the image name be present.
     """
 
-    points = [ l.checkpoint() ]
-    rv = [ l.require(l.image_name_component) ]
+    points = [l.checkpoint()]
+    rv = [l.require(l.image_name_component)]
 
     while True:
 
@@ -105,7 +106,7 @@ def parse_simple_expression_list(l, image=False):
     simple_expression be present.
     """
 
-    rv = [ l.require(l.simple_expression, image=image) ]
+    rv = [l.require(l.simple_expression, image=image)]
 
     while True:
         if not l.match(','):
@@ -128,13 +129,13 @@ def parse_image_specifier(l):
 
     tag = None
     layer = None
-    at_list = [ ]
+    at_list = []
     zorder = None
-    behind = [ ]
+    behind = []
 
     if l.keyword("expression") or l.keyword("image"):
         expression = l.require(l.simple_expression, image=True)
-        image_name = (expression.strip(),)
+        image_name = (expression.source.strip(),)
     else:
         image_name = parse_image_name(l, True)
         expression = None
@@ -209,9 +210,9 @@ def parse_with(l, node):
 
     expr = l.require(l.simple_expression)
 
-    return [ ast.With(loc, "None", expr),
-             node,
-             ast.With(loc, expr) ]
+    return [ast.With(loc, "None", expr),
+            node,
+            ast.With(loc, expr)]
 
 
 def parse_menu(stmtl, loc, arguments):
@@ -224,12 +225,11 @@ def parse_menu(stmtl, loc, arguments):
     has_caption = False
 
     with_ = None
-    set = None # @ReservedAssignment
-
+    set = None  # @ReservedAssignment
 
     # Tuples of (label, condition, block)
-    items = [ ]
-    item_arguments = [ ]
+    items = []
+    item_arguments = []
 
     while l.advance():
 
@@ -241,7 +241,7 @@ def parse_menu(stmtl, loc, arguments):
             continue
 
         if l.keyword('set'):
-            set = l.require(l.simple_expression) # @ReservedAssignment
+            set = l.require(l.simple_expression)  # @ReservedAssignment
             l.expect_eol()
             l.expect_noblock('set menuitem')
 
@@ -327,7 +327,7 @@ def parse_menu(stmtl, loc, arguments):
     if not has_choice:
         stmtl.error("Menu does not contain any choices.")
 
-    rv = [ ]
+    rv = []
     if say_ast:
         rv.append(say_ast)
 
@@ -444,7 +444,7 @@ def parse_parameters(l):
 
             if l.match(r'='):
                 l.skip_whitespace()
-                default = l.delimited_python("),").strip()
+                default = l.delimited_python("),").source.strip()
                 now_default = True
 
                 if not default:
@@ -478,7 +478,7 @@ def parse_arguments(l):
     if l.match(r'\)'):
         return EMPTY_ARGUMENTS
 
-    arguments = [ ]
+    arguments = []
     starred_indexes = set()
     doublestarred_indexes = set()
 
@@ -544,7 +544,7 @@ class ParseTrie(object):
 
     def __init__(self):
         self.default = None
-        self.words = { }
+        self.words = {}
 
     def add(self, name, function):
 
@@ -597,7 +597,7 @@ def statement(keywords):
 @statement("if")
 def if_statement(l, loc):
 
-    entries = [ ]
+    entries = []
 
     condition = l.require(l.python_expression)
     l.require(':')
@@ -675,9 +675,10 @@ def IF_statement(l, loc):
         l.advance()
 
     if rv is None:
-        rv = [ ]
+        rv = []
 
     return rv
+
 
 @statement("while")
 def while_statement(l, loc):
@@ -715,7 +716,7 @@ def menu_statement(l, loc):
 
     l.advance()
 
-    rv = [ ]
+    rv = []
 
     if label:
         rv.append(ast.Label(loc, label, [], None))
@@ -777,7 +778,8 @@ def call_statement(l, loc):
 
     arguments = parse_arguments(l)
 
-    rv = [ ast.Call(loc, target, expression, arguments, (expression and l.global_label or "")) ] # type: list[ast.Call|ast.Label|ast.Pass]
+    # type: list[ast.Call|ast.Label|ast.Pass]
+    rv = [ast.Call(loc, target, expression, arguments, (expression and l.global_label or ""))]
 
     if l.keyword('from'):
         name = l.require(l.label_name_declare)
@@ -785,7 +787,8 @@ def call_statement(l, loc):
     else:
         if renpy.scriptedit.lines and (loc in renpy.scriptedit.lines):
             if expression:
-                renpy.add_from.report_missing("expression", renpy.lexer.original_filename, renpy.scriptedit.lines[loc].end)
+                renpy.add_from.report_missing("expression", renpy.lexer.original_filename,
+                                              renpy.scriptedit.lines[loc].end)
             else:
                 renpy.add_from.report_missing(target, renpy.lexer.original_filename, renpy.scriptedit.lines[loc].end)
 
@@ -851,7 +854,7 @@ def show_layer_statement(l, loc):
     if l.keyword("at"):
         at_list = parse_simple_expression_list(l)
     else:
-        at_list = [ ]
+        at_list = []
 
     if l.match(':'):
         l.expect_block('show layer statement')
@@ -876,7 +879,7 @@ def camera_statement(l, loc):
     if l.keyword("at"):
         at_list = parse_simple_expression_list(l)
     else:
-        at_list = [ ]
+        at_list = []
 
     if l.match(':'):
         l.expect_block('camera statement')
@@ -938,7 +941,7 @@ def image_statement(l, loc):
     rv = ast.Image(loc, name, expr, atl)
 
     if not l.init:
-        rv = ast.Init(loc, [ rv ], 500 + l.init_offset)
+        rv = ast.Init(loc, [rv], 500 + l.init_offset)
 
     l.advance()
 
@@ -985,7 +988,7 @@ def define_statement(l, loc):
     rv = ast.Define(loc, store, name, index, operator, expr)
 
     if not l.init:
-        rv = ast.Init(loc, [ rv ], priority + l.init_offset)
+        rv = ast.Init(loc, [rv], priority + l.init_offset)
 
     l.advance()
 
@@ -1019,7 +1022,7 @@ def default_statement(l, loc):
     rv = ast.Default(loc, store, name, expr)
 
     if not l.init:
-        rv = ast.Init(loc, [ rv ], priority + l.init_offset)
+        rv = ast.Init(loc, [rv], priority + l.init_offset)
 
     l.advance()
 
@@ -1049,7 +1052,9 @@ def transform_statement(l, loc):
         for p in parameters.parameters.values():
             if p.kind == p.POSITIONAL_ONLY and not found_pos_only:
                 found_pos_only = True
-                l.deferred_error("atl_pos_only", "the transform statement does not take positional-only parameters ({} is not allowed)".format(p))
+                l.deferred_error(
+                    "atl_pos_only",
+                    "the transform statement does not take positional-only parameters ({} is not allowed)".format(p))
             elif p.kind == p.VAR_POSITIONAL:
                 l.error("the transform statement does not take *args ({} is not allowed)".format(p))
             elif p.kind == p.VAR_KEYWORD:
@@ -1063,10 +1068,10 @@ def transform_statement(l, loc):
 
     atl = renpy.atl.parse_atl(l.subblock_lexer())
 
-    rv = ast.Transform(loc, store, name, atl, parameters) #type: ignore
+    rv = ast.Transform(loc, store, name, atl, parameters)  # type: ignore
 
     if not l.init:
-        rv = ast.Init(loc, [ rv ], priority + l.init_offset)
+        rv = ast.Init(loc, [rv], priority + l.init_offset)
 
     l.advance()
 
@@ -1150,7 +1155,7 @@ def init_offset_statement(l, loc):
     l.advance()
 
     l.init_offset = int(offset)
-    return [ ]
+    return []
 
 
 @statement("init label")
@@ -1192,7 +1197,7 @@ def init_statement(l, loc):
                 l.revert(checkpoint)
                 l.error("init expects a block or statement")
 
-            block = [ stmt ]
+            block = [stmt]
 
         finally:
             l.init = old_init
@@ -1216,7 +1221,7 @@ def rpy_statement(l, loc):
     l.expect_noblock('rpy monologue')
     l.advance()
 
-    return [ ]
+    return []
 
 
 @statement("screen")
@@ -1235,7 +1240,7 @@ def screen_statement(l, loc):
     rv = ast.Screen(loc, screen)
 
     if not l.init:
-        rv = ast.Init(loc, [ rv ], -500 + l.init_offset)
+        rv = ast.Init(loc, [rv], -500 + l.init_offset)
 
     return rv
 
@@ -1257,7 +1262,7 @@ def testcase_statement(l, loc):
     rv = ast.Testcase(loc, name, test)
 
     if not l.init:
-        rv = ast.Init(loc, [ rv ], 500 + l.init_offset)
+        rv = ast.Init(loc, [rv], 500 + l.init_offset)
 
     return rv
 
@@ -1269,13 +1274,16 @@ def translate_strings(init_loc, language, l):
 
     ll = l.subblock_lexer()
 
-    block = [ ]
+    block = []
 
     old = None
     loc = None
 
     def parse_string(s):
-        s = s.strip()
+        try:
+            s = s.strip()
+        except AttributeError:
+            s = s.source.strip()
 
         try:
             bc = compile(s, "<string>", "eval", renpy.python.new_compile_flags, True)
@@ -1330,7 +1338,9 @@ def translate_strings(init_loc, language, l):
 
     return ast.Init(init_loc, block, l.init_offset)
 
+
 translate_none_files = set()
+
 
 @statement("translate")
 def translate_statement(l, loc):
@@ -1351,8 +1361,8 @@ def translate_statement(l, loc):
         try:
             l.init = True
 
-            block = [ python_statement(l, loc) ]
-            return [ ast.TranslateEarlyBlock(loc, language, block) ]
+            block = [python_statement(l, loc)]
+            return [ast.TranslateEarlyBlock(loc, language, block)]
         finally:
             l.init = old_init
 
@@ -1362,8 +1372,8 @@ def translate_statement(l, loc):
         try:
             l.init = True
 
-            block = [ style_statement(l, loc) ]
-            return [ ast.TranslateBlock(loc, language, block) ]
+            block = [style_statement(l, loc)]
+            return [ast.TranslateBlock(loc, language, block)]
         finally:
             l.init = old_init
 
@@ -1371,7 +1381,9 @@ def translate_statement(l, loc):
     l.expect_eol()
 
     if language is None and (loc[0] not in translate_none_files):
-        l.deferred_error("check_translate_none", "The `translate None` statement (without style or python) is not allowed. Use say with id instead. (https://www.renpy.org/doc/html/translation.html#tips)")
+        l.deferred_error(
+            "check_translate_none",
+            "The `translate None` statement (without style or python) is not allowed. Use say with id instead. (https://www.renpy.org/doc/html/translation.html#tips)")
         translate_none_files.add(loc[0])
 
     l.expect_block("translate statement")
@@ -1380,7 +1392,7 @@ def translate_statement(l, loc):
 
     l.advance()
 
-    return [ ast.Translate(loc, identifier, language, block), ast.EndTranslate(loc) ]
+    return [ast.Translate(loc, identifier, language, block), ast.EndTranslate(loc)]
 
 
 @statement("style")
@@ -1399,47 +1411,47 @@ def style_statement(l, loc):
             if rv.parent is not None:
                 l.error("parent clause appears twice.")
 
-            rv.parent = l.require(l.word) # type: ignore
+            rv.parent = l.require(l.word)  # type: ignore
             return True
 
         if l.keyword("clear"):
-            rv.clear = True # type: ignore
+            rv.clear = True  # type: ignore
             return True
 
         if l.keyword("take"):
-            if rv.take is not None: # type: ignore
+            if rv.take is not None:  # type: ignore
                 l.error("take clause appears twice.")
 
-            rv.take = l.require(l.name) # type: ignore
+            rv.take = l.require(l.name)  # type: ignore
             return True
 
         if l.keyword("del"):
             propname = l.require(l.name)
 
-            if propname not in renpy.style.prefixed_all_properties: # @UndefinedVariable
+            if propname not in renpy.style.prefixed_all_properties:  # @UndefinedVariable
                 l.error("style property %s is not known." % propname)
 
-            rv.delattr.append(propname) # type: ignore
+            rv.delattr.append(propname)  # type: ignore
             return True
 
         if l.keyword("variant"):
-            if rv.variant is not None: # type: ignore
+            if rv.variant is not None:  # type: ignore
                 l.error("variant clause appears twice.")
 
-            rv.variant = l.require(l.simple_expression) # type: ignore
+            rv.variant = l.require(l.simple_expression)  # type: ignore
 
             return True
 
         propname = l.name()
 
         if propname is not None:
-            if (propname != "properties") and (propname not in renpy.style.prefixed_all_properties): # @UndefinedVariable
+            if (propname != "properties") and (propname not in renpy.style.prefixed_all_properties):  # @UndefinedVariable
                 l.error("style property %s is not known." % propname)
 
-            if propname in rv.properties: # type: ignore
+            if propname in rv.properties:  # type: ignore
                 l.error("style property %s appears twice." % propname)
 
-            rv.properties[propname] = l.require(l.simple_expression) # type: ignore
+            rv.properties[propname] = l.require(l.simple_expression)  # type: ignore
 
             return True
 
@@ -1465,7 +1477,7 @@ def style_statement(l, loc):
             ll.expect_eol()
 
     if not l.init:
-        rv = ast.Init(loc, [ rv ], l.init_offset)
+        rv = ast.Init(loc, [rv], l.init_offset)
 
     l.advance()
 
@@ -1479,7 +1491,7 @@ def rpy_python(l, loc):
 
     while (not rv) or l.match(","):
 
-        r = l.match("3") # for compatibility with old code.
+        r = l.match("3")  # for compatibility with old code.
         if not r:
             r = l.require(l.word, "__future__ name")
 
@@ -1529,19 +1541,21 @@ def finish_say(l, loc, who, what, attributes=None, temporary_attributes=None, in
 
     if isinstance(what, list):
 
-        rv = [ ]
+        rv = []
 
         for i in what:
 
             if i == "{clear}":
-                rv.append(ast.UserStatement(loc, "nvl clear", [ ], (("nvl", "clear"), { })))
+                rv.append(ast.UserStatement(loc, "nvl clear", [], (("nvl", "clear"), {})))
             else:
-                rv.append(ast.Say(loc, who, i, with_, attributes=attributes, interact=interact, arguments=arguments, temporary_attributes=temporary_attributes, identifier=identifier))
+                rv.append(ast.Say(loc, who, i, with_, attributes=attributes, interact=interact,
+                          arguments=arguments, temporary_attributes=temporary_attributes, identifier=identifier))
 
         return rv
 
     else:
-        return ast.Say(loc, who, what, with_, attributes=attributes, interact=interact, arguments=arguments, temporary_attributes=temporary_attributes, identifier=identifier)
+        return ast.Say(loc, who, what, with_, attributes=attributes, interact=interact, arguments=arguments,
+                       temporary_attributes=temporary_attributes, identifier=identifier)
 
 
 def say_attributes(l):
@@ -1549,7 +1563,7 @@ def say_attributes(l):
     Returns a list of say attributes, or None if there aren't any.
     """
 
-    attributes = [ ]
+    attributes = []
     while True:
         prefix = l.match(r'-')
         if not prefix:
@@ -1647,7 +1661,7 @@ def parse_block(l):
     """
 
     l.advance()
-    rv = [ ]
+    rv = []
 
     while not l.eob:
         try:
@@ -1699,6 +1713,7 @@ def parse(fn, filedata=None, linenumber=1):
         rv.append(ast.Return((rv[-1].filename, rv[-1].linenumber), None))
 
     return rv
+
 
 def release_deferred_errors():
     """
@@ -1752,7 +1767,7 @@ def get_parse_errors():
     release_deferred_errors()
 
     rv = parse_errors
-    parse_errors = [ ]
+    parse_errors = []
     return rv
 
 
@@ -1770,7 +1785,7 @@ def report_parse_errors():
 
     f, error_fn = renpy.error.open_error_file("errors.txt", "w")
     with f:
-        f.write("\ufeff") # BOM
+        f.write("\ufeff")  # BOM
 
         print("I'm sorry, but errors were detected in your script. Please correct the", file=f)
         print("errors listed below, and try again.", file=f)
@@ -1800,8 +1815,8 @@ def report_parse_errors():
     renpy.display.error.report_parse_errors(full_text, error_fn)
 
     try:
-        if renpy.game.args.command == "run" or renpy.game.args.errors_in_editor: # type: ignore
-            renpy.exports.launch_editor([ error_fn ], 1, transient=True)
+        if renpy.game.args.command == "run" or renpy.game.args.errors_in_editor:  # type: ignore
+            renpy.exports.launch_editor([error_fn], 1, transient=True)
     except Exception:
         pass
 

@@ -20,7 +20,8 @@
 # WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 from __future__ import division, absolute_import, with_statement, print_function, unicode_literals
-from renpy.compat import PY2, basestring, bchr, bord, chr, open, pystr, range, round, str, tobytes, unicode # *
+from renpy.styledata.stylesets import proxy_properties as incompatible_props
+from renpy.compat import PY2, basestring, bchr, bord, chr, open, pystr, range, round, str, tobytes, unicode  # *
 from typing import Any, Callable, Literal
 
 
@@ -56,7 +57,7 @@ parser = None
 statements = dict()
 
 # A list of statements that are valid anywhere a child can be placed.
-all_child_statements = [ ]
+all_child_statements = []
 
 # Statements that can contain children.
 childbearing_statements = set()
@@ -121,8 +122,6 @@ class PrefixStyle(object):
             parser.add(self)
 
 
-from renpy.styledata.stylesets import proxy_properties as incompatible_props
-
 def check_incompatible_props(new, olds):
     """
     Takes a property and a set of already-seen properties, and checks
@@ -135,6 +134,7 @@ def check_incompatible_props(new, olds):
             return old
 
     return False
+
 
 class Parser(object):
 
@@ -150,9 +150,9 @@ class Parser(object):
 
         # The positional arguments, keyword arguments, and child
         # statements of this statement.
-        self.positional = [ ]
-        self.keyword = { }
-        self.children = { }
+        self.positional = []
+        self.keyword = {}
+        self.children = {}
 
         statements[name] = self
 
@@ -298,7 +298,8 @@ class Parser(object):
                 l.error('keyword argument %r appears more than once in a %s statement.' % (name, self.name))
             incomprop = check_incompatible_props(name, seen_keywords)
             if incomprop:
-                l.deferred_error("check_conflicting_properties", 'keyword argument {!r} is incompatible with {!r}.'.format(name, incomprop))
+                l.deferred_error("check_conflicting_properties",
+                                 'keyword argument {!r} is incompatible with {!r}.'.format(name, incomprop))
 
             if name == "at" and target.atl_transform:
                 l.error("The 'at' property must occur before the 'at transform' block.")
@@ -311,9 +312,15 @@ class Parser(object):
 
             if (not keyword) and (not renpy.config.keyword_after_python):
                 try:
+                    try:
+                        expr = expr.source
+                    except AttributeError:
+                        pass
                     literal_eval(expr)
                 except Exception:
-                    l.error("a non-constant keyword argument like '%s %s' is not allowed after a python block." % (name, expr))
+                    l.error(
+                        "a non-constant keyword argument like '%s %s' is not allowed after a python block." %
+                        (name, expr))
 
             target.keyword.append((name, expr))
 
@@ -345,7 +352,7 @@ class Parser(object):
                 parse_keyword(l, 'expected a keyword argument, colon, or end of line.', True)
 
         # A list of lexers we need to parse the contents of.
-        lexers = [ ]
+        lexers = []
 
         if block:
             lexers.append(l.subblock_lexer())
@@ -606,9 +613,11 @@ def register_sl_displayable(*args, **kwargs):
 
 class DisplayableParser(Parser):
 
-    def __init__(self, name, displayable, style, nchildren=0, scope=False,
-                 pass_context=False, imagemap=False, replaces=False, default_keywords={},
-                 hotspot=False, default_properties=True, unique=False): # type: (str, Callable, str|None, int|Literal["many"]|renpy.object.Sentinel, bool, bool, bool, bool, dict[str, Any], bool, bool, bool) -> None
+    # type: (str, Callable, str|None, int|Literal["many"]|renpy.object.Sentinel, bool, bool, bool, bool, dict[str, Any], bool, bool, bool) -> None
+    def __init__(
+            self, name, displayable, style, nchildren=0, scope=False, pass_context=False, imagemap=False,
+            replaces=False, default_keywords={},
+            hotspot=False, default_properties=True, unique=False):
         """
         `scope`
             If true, the scope is passed into the displayable function as a keyword
@@ -680,7 +689,7 @@ class DisplayableParser(Parser):
             hotspot=self.hotspot,
             name=self.name,
             unique=self.unique,
-            )
+        )
 
         for _i in self.positional:
             expr = l.simple_expression()
@@ -695,7 +704,8 @@ class DisplayableParser(Parser):
 
         if len(rv.positional) != len(self.positional):
             if not rv.keyword_exist("arguments"):
-                l.error("{} statement expects {} positional arguments, got {}.".format(self.name, len(self.positional), len(rv.positional)))
+                l.error("{} statement expects {} positional arguments, got {}.".format(
+                    self.name, len(self.positional), len(rv.positional)))
 
         return rv
 
@@ -832,7 +842,7 @@ class ForParser(Parser):
             name = "_sl2_i"
             pattern = l.text[tuple_start:l.pos]
             stmt = pattern + " = " + name
-            code = renpy.ast.PyCode(stmt, loc)
+            code = renpy.ast.PyExecCode(stmt, filename=loc[0], linenumber=loc[1], col_offset=None)
         else:
             code = None
 
@@ -870,7 +880,9 @@ class BreakParser(Parser):
 
         return slast.SLBreak(loc)
 
+
 for_parser.add(BreakParser("break", False))
+
 
 class ContinueParser(Parser):
 
@@ -880,6 +892,7 @@ class ContinueParser(Parser):
         l.expect_noblock('continue statement')
 
         return slast.SLContinue(loc)
+
 
 for_parser.add(ContinueParser("continue", False))
 
@@ -894,7 +907,7 @@ class OneLinePythonParser(Parser):
         l.expect_eol()
         l.expect_noblock("one-line python")
 
-        code = renpy.ast.PyCode(source, loc)
+        code = renpy.ast.PyExecCode(source, filename=loc[0], linenumber=loc[1], col_offset=None)
         return slast.SLPython(loc, code)
 
 
@@ -914,7 +927,7 @@ class MultiLinePythonParser(Parser):
 
         source = l.python_block()
 
-        code = renpy.ast.PyCode(source, loc)
+        code = renpy.ast.PyExecCode(source, filename=loc[0], linenumber=loc[1], col_offset=None)
         return slast.SLPython(loc, code)
 
 
@@ -1062,7 +1075,7 @@ class CustomParser(Parser):
 
     def parse(self, loc, l, parent, keyword):
 
-        arguments = [ ]
+        arguments = []
 
         # Parse positional arguments.
         for _i in self.positional:
@@ -1080,7 +1093,8 @@ class CustomParser(Parser):
 
         if len(arguments) != len(self.positional):
             if not block.keyword_exist("arguments"):
-                l.error("{} statement expects {} positional arguments, got {}.".format(self.name, len(self.positional), len(arguments)))
+                l.error("{} statement expects {} positional arguments, got {}.".format(
+                    self.name, len(self.positional), len(arguments)))
 
         return slast.SLCustomUse(loc, self.screen, arguments, block)
 
@@ -1095,7 +1109,7 @@ class ScreenParser(Parser):
         screen = slast.SLScreen(loc)
 
         screen.name = l.require(l.word)
-        screen.parameters = renpy.parser.parse_parameters(l) # type: ignore
+        screen.parameters = renpy.parser.parse_parameters(l)  # type: ignore
 
         self.parse_contents(l, screen, can_tag=True)
 

@@ -100,6 +100,9 @@ class _BasePyCode:
         return _py_code_from_reduce, (type(self), 1, self._source, self.metadata)
 
     def __init__(self, source: str, /, **metadata: Unpack[PyCodeMetadata]):
+        if isinstance(source, _BasePyCode):
+            source = source.source
+
         if not source and self.mode == "eval":
             source = "None"
 
@@ -581,6 +584,11 @@ class Say(Node):
         super(Say, self).__init__(loc)
 
         if who is not None:
+            try:
+                who = who.source
+            except AttributeError:
+                pass
+
             # True if who is a simple enough expression we can just look it up.
             if re.match(renpy.lexer.word_regexp + r"\s*$", who):
                 self.who_fast = True

@@ -2013,7 +2013,7 @@ class SLUse(SLNode):
         else:
             const = True
 
-        if isinstance(self.target, renpy.ast.PyExpr):
+        if isinstance(self.target, renpy.ast.PyEvalCode):
 
             self.constant = NOT_CONST
             const = False
@@ -2064,7 +2064,7 @@ class SLUse(SLNode):
 
     def execute(self, context):
 
-        if isinstance(self.target, renpy.ast.PyExpr):
+        if isinstance(self.target, renpy.ast.PyEvalCode):
 
             target_name = eval(self.target, context.globals, context.scope)
             target = renpy.display.screen.get_screen_variant(target_name)
@@ -2174,7 +2174,7 @@ class SLUse(SLNode):
             ast.copy_on_change(c)
 
     def used_screens(self, callback):
-        if not isinstance(self.target, renpy.ast.PyExpr):
+        if not isinstance(self.target, renpy.ast.PyEvalCode):
             callback(self.target)
 
         if self.block is not None:
