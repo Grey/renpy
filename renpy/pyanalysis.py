@@ -779,7 +779,7 @@ class CompilerCache(object):
         Compiles an expression into an AST.
         """
 
-        if isinstance(expr, renpy.ast.PyExpr):
+        if isinstance(expr, renpy.ast.PyCodeType):
             filename = expr.filename
             linenumber = expr.linenumber
         else:
@@ -816,7 +816,7 @@ class CompilerCache(object):
         Compiles a block into an AST.
         """
 
-        if isinstance(code, renpy.ast.PyExpr):
+        if isinstance(code, renpy.ast.PyCodeType):
             key = (code, code.filename, code.linenumber)
         else:
             key = (code, None, None)

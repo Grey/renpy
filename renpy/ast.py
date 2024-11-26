@@ -26,16 +26,14 @@
 # When updating this file, consider if lint.py or warp.py also need
 # updating.
 
-from __future__ import division, absolute_import, with_statement, print_function, unicode_literals
-from renpy.compat import PY2, basestring, bchr, bord, chr, open, pystr, range, round, str, tobytes, unicode # *
+from __future__ import annotations
 
-from typing import Optional, Any
+from typing import ClassVar, Literal, Optional, Any, TypedDict, Unpack
 
 import renpy
 
-import hashlib
+import types
 import re
-import time
 import sys
 
 
@@ -66,31 +64,108 @@ def __newobj__(cls, *args):
     return cls.__new__(cls, *args)
 
 
-class PyExpr(str):
+class PyCodeMetadata(TypedDict):
+    filename: str
+    linenumber: int
+    col_offset: int | None
+
+
+def _py_code_from_reduce(
+    cls: type[PyCodeType],
+    version: int,
+    source: str,
+    metadata: PyCodeMetadata,
+):
+    if version != 1:
+        raise Exception(f"Unknown PyCodeMetadata version {version}")
+
+    return cls(source, **metadata)
+
+
+class PyCodeType(str):
     """
-    Represents a string containing python code.
+    Represents a string containing python code, compiled as exec, eval or hide.
     """
 
-    __slots__ = [
-        'filename',
-        'linenumber',
-        'py',
-        ]
+    __slots__ = ['_metadata_or_code']
 
-    def __new__(cls, s, filename, linenumber, py=3):
-        self = str.__new__(cls, s)
-        self.filename = filename # type: ignore
-        self.linenumber = linenumber # type: ignore
-        self.py = py # type: ignore
+    mode: ClassVar[Literal["exec", "eval", "hide"]]
+    _source: str
+    _metadata_or_code: PyCodeMetadata | types.CodeType
 
-        # Queue the string for precompilation.
-        if self and (renpy.game.script.all_pyexpr is not None):
-            renpy.game.script.all_pyexpr.append(self)
+    def __reduce__(self):
+        return _py_code_from_reduce, (type(self), 1, str(self), self.metadata)
+
+    def __new__(cls, source: str, /, **metadata: Unpack[PyCodeMetadata]):
+        if type(source) != str:
+            source = str(source)
+
+        if not source and cls.mode == "eval":
+            source = "None"
+
+        self = super().__new__(cls, source)
+        self._metadata_or_code = metadata
+
+        # If we are loaded from the file, we need to wait before whole file
+        # is loaded, because 'rpy python' can change compilation flags.
+        if renpy.game.script.all_py_code is not None:
+            renpy.game.script.all_py_code.append(self)
+
+        else:
+            self._metadata_or_code = renpy.python.py_compile(
+                str(self), self.mode,
+                metadata["filename"],
+                metadata["linenumber"])
 
         return self
 
-    def __getnewargs__(self):
-        return (str(self), self.filename, self.linenumber, self.py)
+    @property
+    def metadata(self):
+        if isinstance(self._metadata_or_code, dict):
+            return self._metadata_or_code
+
+        code = self._metadata_or_code
+        filename = code.co_filename
+        positions = iter(code.co_positions())
+
+        # First instruction is always RESUME, with (0, 1, 0, 0) positions,
+        # First real instruction is the second one.
+        next(positions)
+
+        # Also skip all the artificial instructions for which lineno is None.
+        for (start_line, end_line, start_column, end_column) in positions:
+            if start_line is not None:
+                linenumber = start_line
+                col_offset = start_column
+                break
+        else:
+            # Code has no meaningful instructions.
+            linenumber = code.co_firstlineno
+            col_offset = None
+
+        return PyCodeMetadata(filename=filename, linenumber=linenumber, col_offset=col_offset)
+
+    @property
+    def py_code(self):
+        if isinstance(self._metadata_or_code, dict):
+            raise RuntimeError(f"Can not access code of {type(self).__name__} "
+                               "before it is compiled.")
+
+        return self._metadata_or_code
+
+    bytecode = py_code
+
+    @property
+    def filename(self):
+        return self.metadata["filename"]
+
+    @property
+    def linenumber(self):
+        return self.metadata["linenumber"]
+
+    @property
+    def col_offset(self):
+        return self.metadata["col_offset"]
 
     @staticmethod
     def checkpoint():
@@ -99,21 +174,33 @@ class PyExpr(str):
         to revert the list.
         """
 
-        if renpy.game.script.all_pyexpr is None:
+        if renpy.game.script.all_py_code is None:
             return None
 
-        return len(renpy.game.script.all_pyexpr)
+        return len(renpy.game.script.all_py_code)
 
     @staticmethod
     def revert(opaque):
 
-        if renpy.game.script.all_pyexpr is None:
+        if renpy.game.script.all_py_code is None:
             return
 
         if opaque is None:
             return
 
-        renpy.game.script.all_pyexpr[opaque:] = [ ]
+        renpy.game.script.all_py_code[opaque:] = []
+
+
+class PyEvalCode(PyCodeType):
+    mode = "eval"
+
+
+class PyExecCode(PyCodeType):
+    mode = "exec"
+
+
+class PyHideCode(PyCodeType):
+    mode = "hide"
 
 
 def probably_side_effect_free(expr):
@@ -126,68 +213,88 @@ def probably_side_effect_free(expr):
     return not ("(" in expr)
 
 
-class PyCode(object):
+# Kept for pickle compatibility
+class PyExpr(PyEvalCode):
+    # Transform to PyEvalCode.
+    def __new__(cls, s, filename, linenumber, py=3):
+        return PyEvalCode(
+            s,
+            filename=filename,
+            linenumber=linenumber,
+            col_offset=None)
 
-    __slots__ = [
-        'source',
-        'location',
-        'mode',
-        'bytecode',
-        'hash',
-        'py',
-        ]
+    def __reduce__(self):
+        raise Exception("PyExpr does not exists anymore.")
 
-    def __getstate__(self):
-        return (1, self.source, self.location, self.mode, self.py)
 
+# Because it was stateful we can't convert it to a new type.
+class PyCode:
+    __slots__ = ["_py_code"]
+
+    def __new__(cls, source, loc=('<none>', 1), mode='exec'):
+        self = super().__new__(cls)
+
+        # Choose class to the correct subclass of PyCode.
+        if mode == 'eval':
+            cls = PyEvalCode
+        elif mode == 'exec':
+            cls = PyExecCode
+        elif mode == 'hide':
+            cls = PyHideCode
+        else:
+            raise Exception(f"Unknown mode {mode} in PyCode.")
+
+        source = str(source)
+
+        self._py_code = cls(
+            source,
+            filename=loc[0],
+            linenumber=loc[1],
+            col_offset=None)
+
+        return self
+
+    # Update state to new format.
     def __setstate__(self, state):
         if len(state) == 4:
-            (_, self.source, self.location, self.mode) = state
-            self.py = 2
+            (_, source, location, mode) = state
         else:
-            (_, self.source, self.location, self.mode, self.py) = state
+            (_, source, location, mode, _) = state
 
-        self.bytecode = None
+        # Choose class to the correct subclass of PyCode.
+        if mode == 'eval':
+            cls = PyEvalCode
+        elif mode == 'exec':
+            cls = PyExecCode
+        elif mode == 'hide':
+            cls = PyHideCode
+        else:
+            raise Exception(f"Unknown mode {mode} in PyCode.")
 
-        if renpy.game.script.record_pycode:
-            renpy.game.script.all_pycode.append(self)
+        # Source is either a string or a PyExpr, which was just
+        # transformed into a PyEvalCode instance.
 
-    def __init__(self, source, loc=('<none>', 1), mode='exec'):
+        # if isinstance(code, renpy.python.ast.AST): ???
 
-        if isinstance(source, PyExpr):
-            loc = (source.filename, source.linenumber, source)
+        source = str(source)
 
-        self.py = 3
+        filename, linenumber, *_ = location
 
-        # The source code.
-        self.source = source
+        self._py_code = cls(
+            source,
+            filename=filename,
+            linenumber=linenumber,
+            col_offset=None)
 
-        # The time is necessary so we can disambiguate between Python
-        # blocks on the same line in different script versions.
-        self.location = loc + (int(time.time()),)
-        self.mode = mode
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._py_code, name)
 
-        # This will be initialized later on, after we are serialized.
-        self.bytecode = None
+    @property
+    def source(self):
+        return self._py_code
 
-        if renpy.game.script.record_pycode:
-            renpy.game.script.all_pycode.append(self)
-
-        self.hash = self.get_hash()
-
-    def get_hash(self):
-        try:
-            if self.hash is not None:
-                return self.hash
-        except Exception:
-            pass
-
-        code = self.source
-        if isinstance(code, renpy.python.ast.AST): # @UndefinedVariable
-            code = renpy.python.ast.dump(code) # @UndefinedVariable
-
-        self.hash = bchr(renpy.bytecode_version) + hashlib.md5((repr(self.location) + code).encode("utf-8")).digest() # type:ignore
-        return self.hash
+    def __reduce__(self):
+        return self._py_code.__reduce__()
 
 
 def chain_block(block, next): # @ReservedAssignment

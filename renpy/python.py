@@ -1032,18 +1032,15 @@ def py_compile(source, mode, filename='<none>', lineno=1, ast_node=False, cache=
     if isinstance(source, ast.Module):
         return compile(source, filename, mode)
 
-    if isinstance(source, renpy.ast.PyExpr):
+    if isinstance(source, renpy.ast.PyCodeType):
         filename = source.filename
         lineno = source.linenumber
+        mode = source.mode
 
-        if py is None:
-            py = source.py
-
-    if py is None:
-        py = 3
+    source = str(source)
 
     if cache:
-        key = (lineno, filename, str(source), mode, renpy.script.MAGIC)
+        key = (lineno, filename, source, mode, renpy.script.MAGIC)
         warnings_key = ("warnings", key)
 
         rv = py_compile_cache.get(key, None)
@@ -1072,7 +1069,6 @@ def py_compile(source, mode, filename='<none>', lineno=1, ast_node=False, cache=
         warnings_key = None
         key = None
 
-    source = str(source)
     source = source.replace("\r", "")
 
     if mode == "eval":
