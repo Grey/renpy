@@ -141,13 +141,20 @@ class ShaderPart(object):
             if not a:
                 continue
 
-            a = tuple(a)
+            # Handle array declarations like "uniform vec4 colours[4]"
+            if len(a) >= 3 and '[' in a[2]:
+                base_name, array_part = a[2].split('[', 1)
+                array_size = array_part.rstrip(']')
+                a = (a[0], a[1], base_name)  # Store base name without array part
+                type_ = a[1] + '[' + array_size + ']'  # Full type including array size
+            else:
+                a = tuple(a)
+                type_ = a[1] if len(a) >= 2 else None
 
             if len(a) != 3:
-                raise Exception("{}: Unknown shader variable line {!r}. Only the form '{{uniform,attribute,vertex}} {{type}} {{name}} is allowed.".format(self.name, l))
+                raise Exception("{}: Unknown shader variable line {!r}. Only the form '{{uniform,attribute,vertex}} {{type}} {{name}} or '{{uniform,attribute,vertex}} {{type}} {{name}}[size]' is allowed.".format(self.name, l))
 
             kind = a[0]
-            type_ = a[1]
             name = a[2]
 
             self.variable_types[name] = type_

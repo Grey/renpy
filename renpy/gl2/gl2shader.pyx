@@ -146,7 +146,118 @@ cdef class UniformSampler2D(Uniform):
 
         self.last_data = None
 
+cdef class UniformFloatArray(Uniform):
+    cdef void assign(self, Program program, data):
+        glUniform1fv(self.location, len(data), data)
 
+cdef class UniformVec2Array(Uniform):
+    cdef void assign(self, Program program, data):
+        glUniform2fv(self.location, len(data) // 2, data)
+
+cdef class UniformVec3Array(Uniform):
+    cdef void assign(self, Program program, data):
+        glUniform3fv(self.location, len(data) // 3, data)
+
+cdef class UniformVec4Array(Uniform):
+    cdef void assign(self, Program program, data):
+        glUniform4fv(self.location, len(data) // 4, data)
+
+cdef class UniformMat4Array(Uniform):
+    cdef void assign(self, Program program, data):
+        # Assuming data is a list of Matrix objects
+        cdef int count = len(data)
+        cdef float *values = <float *> malloc(count * 16 * sizeof(float))
+        cdef int i
+        
+        try:
+            for 0 <= i < count:
+                memcpy(values + i * 16, (<Matrix>data[i]).m, 16 * sizeof(float))
+            
+            glUniformMatrix4fv(self.location, count, GL_FALSE, values)
+        finally:
+            free(values)
+
+cdef class UniformSampler2DArray(Uniform):
+    cdef int *samplers
+    cdef int count
+    cdef object last_data
+    cdef bint cleanup
+    cdef object texture_wrap_key
+
+    def __init__(self, program, location, name):
+        Uniform.__init__(self, program, location, name)
+        self.count = program.get_array_size(name)
+        self.samplers = <int *>malloc(self.count * sizeof(int))
+        self.cleanup = False
+        self.texture_wrap_key = "texture_wrap_" + name
+        
+        for i in range(self.count):
+            self.samplers[i] = program.samplers + i
+        program.samplers += self.count
+
+    def __dealloc__(self):
+        if self.samplers != NULL:
+            free(self.samplers)
+
+    cdef void assign(self, Program program, data):
+        cdef dict properties = program.properties
+        cdef int i
+        self.last_data = data
+        self.cleanup = False
+
+        if len(data) > self.count:
+            raise Exception(f"Too many textures provided for sampler array (got {len(data)}, max {self.count})")
+
+        # Set up each texture in the array
+        for i in range(len(data)):
+            glActiveTexture(GL_TEXTURE0 + self.samplers[i])
+            glUniform1i(self.location + i, self.samplers[i])
+
+            if isinstance(data[i], GLTexture):
+                glBindTexture(GL_TEXTURE_2D, data[i].number)
+            else:
+                glBindTexture(GL_TEXTURE_2D, data[i])
+
+            if self.texture_wrap_key in properties:
+                wrap_s, wrap_t = properties[self.texture_wrap_key]
+                glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, wrap_s)
+                glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, wrap_t)
+                self.cleanup = True
+
+            elif "texture_wrap" in properties:
+                wrap_s, wrap_t = properties["texture_wrap"]
+                glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, wrap_s)
+                glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, wrap_t)
+                self.cleanup = True
+
+            if "anisotropic" in properties:
+                if not properties.get("anisotropic", True) and renpy.display.draw.texture_loader.max_anisotropy > 1.0:
+                    glTexParameterf(GL_TEXTURE_2D, TEXTURE_MAX_ANISOTROPY_EXT, 1.0)
+                    self.cleanup = True
+
+    cdef void finish(self, Program program):
+        cdef dict properties = program.properties
+        cdef int i
+        self.ready = False
+
+        if self.cleanup and self.last_data is not None:
+            for i in range(len(self.last_data)):
+                glActiveTexture(GL_TEXTURE0 + self.samplers[i])
+                
+                if isinstance(self.last_data[i], GLTexture):
+                    glBindTexture(GL_TEXTURE_2D, self.last_data[i].number)
+                else:
+                    glBindTexture(GL_TEXTURE_2D, self.last_data[i])
+
+                if "texture_wrap" in properties or self.texture_wrap_key in properties:
+                    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE)
+                    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE)
+
+                if "anisotropic" in properties:
+                    if not properties.get("anisotropic", True) and renpy.display.draw.texture_loader.max_anisotropy > 1.0:
+                        glTexParameterf(GL_TEXTURE_2D, TEXTURE_MAX_ANISOTROPY_EXT, renpy.display.draw.texture_loader.max_anisotropy)
+
+        self.last_data = None
 
 UNIFORM_TYPES = {
     "float" : UniformFloat,
@@ -155,7 +266,13 @@ UNIFORM_TYPES = {
     "vec4" : UniformVec4,
     "mat4" : UniformMat4,
     "sampler2D" : UniformSampler2D,
-    }
+    "float[]" : UniformFloatArray,
+    "vec2[]" : UniformVec2Array,
+    "vec3[]" : UniformVec3Array,
+    "vec4[]" : UniformVec4Array,
+    "mat4[]" : UniformMat4Array,
+    "sampler2D[]" : UniformSampler2DArray,
+}
 
 cdef class Attribute:
     cdef object name
@@ -235,21 +352,32 @@ cdef class Program:
 
             token = advance()
 
-            if token in ( "highp", "mediump", "lowp"):
+            #if token in ( "highp", "mediump", "lowp" ):
+            if token in GLSL_PRECISIONS:
                 token = advance()
                 continue
 
-            if token not in types:
-                raise ShaderError("Unsupported type {} in '{}'. Only float, vec<2-4>, mat<2-4>, and sampler2D are supported.".format(token, l))
+            # Handle array types
+            is_array = False
+            array_size = ""
+            name = None
+            
+            if tokens:
+                name = tokens[0]
+                if '[' in name:
+                    name, array_part = name.split('[', 1)
+                    array_size = array_part.rstrip(']')
+                    is_array = True
+                    tokens[0] = name
 
-            type = token
+            if token not in types and not (is_array and token+"[]" in types):
+                raise ShaderError("Unsupported type {} in '{}'. Only float, vec<2-4>, mat<2-4>, sampler2D and their arrays are supported.".format(token, l))
 
+            type = token if not is_array else (token + "[]")
+            
             name = advance()
             if name is None:
-                raise ShaderError("Couldn't finds name in {}".format(l))
-
-            if tokens:
-                raise ShaderError("Spurious tokens after the name in '{}'. Arrays are not supported in Ren'Py.".format(l))
+                raise ShaderError("Couldn't find name in {}".format(l))
 
             if storage == "uniform":
                 location = glGetUniformLocation(self.program, name.encode("utf-8"))
@@ -456,3 +584,20 @@ cdef class Program:
 
         self.properties = None
         self.uniform_values = { }
+
+    def get_array_size(self, name):
+        """
+        Gets the size of an array uniform from the shader source.
+        """
+        array_size = 1
+        
+        for source in [self.vertex, self.fragment]:
+            for line in source.split('\n'):
+                if name in line and '[' in line:
+                    try:
+                        array_size = int(line.split('[')[1].split(']')[0])
+                        break
+                    except (IndexError, ValueError):
+                        continue
+        
+        return array_size
